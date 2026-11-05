@@ -37,19 +37,27 @@ http {
     server_tokens off;
     more_set_headers "Server: nginx";
 
+    server_names_hash_bucket_size 64;
+
     sendfile on;
     keepalive_timeout 65;
     client_max_body_size 100m;
 
+    # Remnawave does not compress response bodies itself
     gzip on;
+    gzip_vary on;
     gzip_proxied any;
-    gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
+    gzip_comp_level 6;
+    gzip_min_length 1024;
+    gzip_types application/javascript application/json application/manifest+json application/xml application/wasm
+        font/eot font/otf font/ttf image/svg+xml text/css text/javascript text/plain text/xml;
 
     # Used by the ACME clients to resolve the CA
     resolver conf ipv6=off;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ecdh_curve X25519:prime256v1:secp384r1;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
     ssl_session_tickets off;
@@ -151,6 +159,7 @@ location = / {
 
 location / {
     include /etc/angie/snippets/proxy.conf;
+    proxy_intercept_errors on;
     proxy_pass http://127.0.0.1:3010;
 }
 EOF
@@ -179,13 +188,13 @@ write_angie_panel_auth() {
         chmod 644 "$dir/snippets/.htpasswd"
 
         cat >"$auth_file" <<EOF
-map \$cookie_access \$panel_auth_realm {
+map \$cookie_$PANEL_COOKIE_NAME \$panel_auth_realm {
     "$PANEL_SECRET_KEY" off;
     default "Restricted";
 }
 
 map \$host \$panel_set_cookie {
-    default "access=$PANEL_SECRET_KEY; $cookie_attrs";
+    default "$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY; $cookie_attrs";
 }
 
 map \$http_authorization \$panel_upstream_authorization {
@@ -207,18 +216,18 @@ location / {
 EOF
     else
         cat >"$auth_file" <<EOF
-map \$cookie_access \$panel_cookie_allowed {
+map \$cookie_$PANEL_COOKIE_NAME \$panel_cookie_allowed {
     "$PANEL_SECRET_KEY" 1;
     default 0;
 }
 
-map \$arg_access \$panel_allowed {
+map \$arg_$PANEL_COOKIE_NAME \$panel_allowed {
     "$PANEL_SECRET_KEY" 1;
     default \$panel_cookie_allowed;
 }
 
-map \$arg_access \$panel_set_cookie {
-    "$PANEL_SECRET_KEY" "access=$PANEL_SECRET_KEY; $cookie_attrs";
+map \$arg_$PANEL_COOKIE_NAME \$panel_set_cookie {
+    "$PANEL_SECRET_KEY" "$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY; $cookie_attrs";
     default "";
 }
 EOF
@@ -235,12 +244,29 @@ location / {
 }
 EOF
     fi
+
+    # OAuth providers redirect back without the cookie: SameSite=Strict withholds it on
+    # cross-site navigation. Every real callback carries both "code" and "state".
+    cat >>"$dir/snippets/panel.conf" <<'EOF'
+
+location ^~ /oauth2/ {
+    if ($arg_code = "") {
+        return 403;
+    }
+    if ($arg_state = "") {
+        return 403;
+    }
+
+    include /etc/angie/snippets/proxy.conf;
+    proxy_pass http://127.0.0.1:3000;
+}
+EOF
 }
 
 # Let's Encrypt prefers IPv6 when a domain has an AAAA record, so also listen on it.
 # Binding [::] fails on hosts with IPv6 disabled, hence the check.
 angie_has_ipv6() {
-    [ -s /proc/net/if_inet6 ]
+    grep -q . /proc/net/if_inet6 2>/dev/null
 }
 
 # Print "listen" lines for port 80
@@ -253,15 +279,14 @@ angie_http_listens() {
     fi
 }
 
-# Print "listen" lines for TLS. Behind Xray both the port and the socket are served,
-# so the fallback works whichever of them the "target" in the panel's Xray config uses.
+# Print "listen" lines for TLS. Behind Xray only loopback is served: Xray owns
+# 0.0.0.0:443 and passes everything its core cannot handle to this port as plain TLS.
 angie_tls_listens() {
     local mode="$1"
     local params="$2"
 
     if [ "$mode" = "xray" ]; then
-        echo "    listen 127.0.0.1:$SELFSTEAL_PORT ssl proxy_protocol$params;"
-        echo "    listen unix:$ANGIE_SOCKET_PATH ssl proxy_protocol$params;"
+        echo "    listen 127.0.0.1:$SELFSTEAL_PORT ssl$params;"
     else
         echo "    listen 443 ssl$params;"
         if angie_has_ipv6; then
@@ -283,15 +308,6 @@ write_angie_sites() {
     local site client domain snippet domains=""
 
     {
-        if [ "$mode" != "direct" ]; then
-            cat <<'EOF'
-set_real_ip_from 127.0.0.1;
-set_real_ip_from unix:;
-real_ip_header proxy_protocol;
-
-EOF
-        fi
-
         # A failed challenge is retried after 15 minutes: 4 attempts per hour stay
         # under the Let's Encrypt limit of 5 failed validations per hour
         for site in "$@"; do
@@ -349,12 +365,10 @@ write_angie_docker_compose() {
     local mode="$2"
     local container="$3"
 
-    local command_block="" socket_volume="" healthcheck=""
+    local healthcheck=""
     if [ "$mode" = "xray" ]; then
-        command_block="        command: sh -c 'rm -f $ANGIE_SOCKET_PATH && exec angie -g \"daemon off;\"'"$'\n'
-        socket_volume="            - /dev/shm:/dev/shm"$'\n'
         healthcheck="        healthcheck:
-            test: [\"CMD\", \"test\", \"-S\", \"$ANGIE_SOCKET_PATH\"]
+            test: [\"CMD\", \"nc\", \"-z\", \"127.0.0.1\", \"$SELFSTEAL_PORT\"]
             interval: 2s
             timeout: 5s
             retries: 15
@@ -368,11 +382,11 @@ services:
         container_name: $container
         hostname: $container
         restart: unless-stopped
-${command_block}        volumes:
+        volumes:
             - ./angie.conf:/etc/angie/angie.conf:ro
             - ./conf.d:/etc/angie/conf.d:ro
             - ./snippets:/etc/angie/snippets:ro
-${socket_volume}            - remnawave-angie-acme:/var/lib/angie/acme
+            - remnawave-angie-acme:/var/lib/angie/acme
         network_mode: host
 ${healthcheck}        logging:
             driver: 'json-file'

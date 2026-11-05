@@ -104,8 +104,8 @@ allow_ufw_node_port_from_panel_ip() {
 # Start node container and show results
 start_node_and_show_results() {
     # Wait for Angie before starting Node
-    if ! wait_for_angie_socket 30; then
-        show_error "$(t error_angie_socket_timeout)"
+    if ! wait_for_angie 30; then
+        show_error "$(t error_angie_timeout)"
         exit 1
     fi
 

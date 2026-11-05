@@ -443,9 +443,9 @@ TRANSLATIONS_RU[selfsteal_domain_info]="• Домен:"
 TRANSLATIONS_RU[selfsteal_directory_info]="• Директория:"
 
 # Angie socket and certificates
-TRANSLATIONS_RU[waiting_for_angie_socket]="Ожидание готовности сокета Angie..."
-TRANSLATIONS_RU[error_angie_socket_timeout]="Превышено время ожидания сокета Angie. Возможно, Angie не запустился."
-TRANSLATIONS_RU[angie_socket_ready]="Сокет Angie готов"
+TRANSLATIONS_RU[waiting_for_angie]="Ожидание готовности Angie..."
+TRANSLATIONS_RU[error_angie_timeout]="Превышено время ожидания Angie. Возможно, Angie не запустился."
+TRANSLATIONS_RU[angie_ready]="Angie готов"
 TRANSLATIONS_RU[waiting_for_certificates]="Ожидание сертификатов Let's Encrypt..."
 TRANSLATIONS_RU[certificates_ready]="Сертификаты выпущены, обновление автоматическое"
 TRANSLATIONS_RU[certificates_timeout]="Сертификаты пока не выпущены:"

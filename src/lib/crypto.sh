@@ -103,6 +103,12 @@ generate_nonce() {
     echo "$nonce"
 }
 
+# Generate the panel access cookie: a fixed name would identify this public installer
+generate_panel_access_secret() {
+    PANEL_COOKIE_NAME=$(tr -dc 'a-z' </dev/urandom | head -c 12)
+    PANEL_SECRET_KEY=$(openssl rand -hex 32 | tr -d '\n')
+}
+
 # Generate common secrets
 generate_secrets() {
     # 3.0.0 uses a single APP_SECRET; the JWT_* secrets remain for --panel-branch=2.x

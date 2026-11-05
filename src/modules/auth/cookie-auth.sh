@@ -1,13 +1,13 @@
 #!/bin/bash
 
 generate_cookie_auth_secrets() {
-  PANEL_SECRET_KEY=$(openssl rand -hex 32 | tr -d '\n')
+  generate_panel_access_secret
 }
 
 # Save credentials for cookie auth
 save_credentials_cookie_auth() {
   CREDENTIALS_FILE="$REMNAWAVE_DIR/credentials.txt"
-  echo "PANEL URL: https://$PANEL_DOMAIN/auth/login?access=$PANEL_SECRET_KEY" >>"$CREDENTIALS_FILE"
+  echo "PANEL URL: https://$PANEL_DOMAIN/auth/login?$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY" >>"$CREDENTIALS_FILE"
   echo >>"$CREDENTIALS_FILE"
   echo "REMNAWAVE ADMIN USERNAME: $SUPERADMIN_USERNAME" >>"$CREDENTIALS_FILE"
   echo "REMNAWAVE ADMIN PASSWORD: $SUPERADMIN_PASSWORD" >>"$CREDENTIALS_FILE"
@@ -17,7 +17,7 @@ save_credentials_cookie_auth() {
 
 display_cookie_auth_results() {
   local installation_type="${1:-panel}" # Default to panel if not specified
-  local secure_panel_url="https://$PANEL_DOMAIN/auth/login?access=$PANEL_SECRET_KEY"
+  local secure_panel_url="https://$PANEL_DOMAIN/auth/login?$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY"
 
   # Calculate width based on longest line
   local max_width=${#secure_panel_url}

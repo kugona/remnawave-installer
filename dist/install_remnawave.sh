@@ -109,7 +109,6 @@ SUBSCRIPTION_PAGE_DIR="$REMNAWAVE_DIR/subscription"
 LEGACY_SUBSCRIPTION_PAGE_DIR="$REMNAWAVE_DIR/subscription-page"
 
 ANGIE_IMAGE="docker.angie.software/angie:1.12.4-alpine"
-ANGIE_SOCKET_PATH="/dev/shm/angie.sock"
 ACME_DIRECTORY_URL="https://acme-v02.api.letsencrypt.org/directory"
 SELFSTEAL_PORT="9443"
 
@@ -543,9 +542,9 @@ TRANSLATIONS_EN[selfsteal_installation_stopped]="Installation stopped"
 TRANSLATIONS_EN[selfsteal_domain_info]="• Domain:"
 TRANSLATIONS_EN[selfsteal_directory_info]="• Directory:"
 
-TRANSLATIONS_EN[waiting_for_angie_socket]="Waiting for Angie socket to be ready..."
-TRANSLATIONS_EN[error_angie_socket_timeout]="Timeout waiting for Angie socket. Angie may have failed to start."
-TRANSLATIONS_EN[angie_socket_ready]="Angie socket is ready"
+TRANSLATIONS_EN[waiting_for_angie]="Waiting for Angie to be ready..."
+TRANSLATIONS_EN[error_angie_timeout]="Timeout waiting for Angie. Angie may have failed to start."
+TRANSLATIONS_EN[angie_ready]="Angie is ready"
 TRANSLATIONS_EN[waiting_for_certificates]="Waiting for Let's Encrypt certificates..."
 TRANSLATIONS_EN[certificates_ready]="Certificates issued, renewal is automatic"
 TRANSLATIONS_EN[certificates_timeout]="Certificates not issued yet:"
@@ -1044,9 +1043,9 @@ TRANSLATIONS_RU[selfsteal_installation_stopped]="Установка остано
 TRANSLATIONS_RU[selfsteal_domain_info]="• Домен:"
 TRANSLATIONS_RU[selfsteal_directory_info]="• Директория:"
 
-TRANSLATIONS_RU[waiting_for_angie_socket]="Ожидание готовности сокета Angie..."
-TRANSLATIONS_RU[error_angie_socket_timeout]="Превышено время ожидания сокета Angie. Возможно, Angie не запустился."
-TRANSLATIONS_RU[angie_socket_ready]="Сокет Angie готов"
+TRANSLATIONS_RU[waiting_for_angie]="Ожидание готовности Angie..."
+TRANSLATIONS_RU[error_angie_timeout]="Превышено время ожидания Angie. Возможно, Angie не запустился."
+TRANSLATIONS_RU[angie_ready]="Angie готов"
 TRANSLATIONS_RU[waiting_for_certificates]="Ожидание сертификатов Let's Encrypt..."
 TRANSLATIONS_RU[certificates_ready]="Сертификаты выпущены, обновление автоматическое"
 TRANSLATIONS_RU[certificates_timeout]="Сертификаты пока не выпущены:"
@@ -1417,22 +1416,22 @@ get_node_dir() {
     fi
 }
 
-wait_for_angie_socket() {
+wait_for_angie() {
     local max_wait=${1:-30}
     local elapsed=0
 
-    show_info "$(t waiting_for_angie_socket)" "$ORANGE"
+    show_info "$(t waiting_for_angie)" "$ORANGE"
 
-    while [ ! -S "$ANGIE_SOCKET_PATH" ]; do
+    until (exec 3<>"/dev/tcp/127.0.0.1/$SELFSTEAL_PORT") 2>/dev/null; do
         if [ $elapsed -ge $max_wait ]; then
-            show_error "$(t error_angie_socket_timeout)"
+            show_error "$(t error_angie_timeout)"
             return 1
         fi
         sleep 1
         ((elapsed++))
     done
 
-    show_success "$(t angie_socket_ready)"
+    show_success "$(t angie_ready)"
     return 0
 }
 
@@ -2347,6 +2346,11 @@ generate_nonce() {
     done
 
     echo "$nonce"
+}
+
+generate_panel_access_secret() {
+    PANEL_COOKIE_NAME=$(tr -dc 'a-z' </dev/urandom | head -c 12)
+    PANEL_SECRET_KEY=$(openssl rand -hex 32 | tr -d '\n')
 }
 
 generate_secrets() {
@@ -3617,7 +3621,7 @@ generate_xray_config() {
         "realitySettings": {
           "target": "$fallback_target",
           "show": false,
-          "xver": 1,
+          "xver": 0,
           "minClientVer": "0.0.0",
           "shortIds": [
             "$short_id"
@@ -3718,19 +3722,27 @@ http {
     server_tokens off;
     more_set_headers "Server: nginx";
 
+    server_names_hash_bucket_size 64;
+
     sendfile on;
     keepalive_timeout 65;
     client_max_body_size 100m;
 
+    # Remnawave does not compress response bodies itself
     gzip on;
+    gzip_vary on;
     gzip_proxied any;
-    gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
+    gzip_comp_level 6;
+    gzip_min_length 1024;
+    gzip_types application/javascript application/json application/manifest+json application/xml application/wasm
+        font/eot font/otf font/ttf image/svg+xml text/css text/javascript text/plain text/xml;
 
     # Used by the ACME clients to resolve the CA
     resolver conf ipv6=off;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ecdh_curve X25519:prime256v1:secp384r1;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
     ssl_session_tickets off;
@@ -3828,6 +3840,7 @@ location = / {
 
 location / {
     include /etc/angie/snippets/proxy.conf;
+    proxy_intercept_errors on;
     proxy_pass http://127.0.0.1:3010;
 }
 EOF
@@ -3851,13 +3864,13 @@ write_angie_panel_auth() {
         chmod 644 "$dir/snippets/.htpasswd"
 
         cat >"$auth_file" <<EOF
-map \$cookie_access \$panel_auth_realm {
+map \$cookie_$PANEL_COOKIE_NAME \$panel_auth_realm {
     "$PANEL_SECRET_KEY" off;
     default "Restricted";
 }
 
 map \$host \$panel_set_cookie {
-    default "access=$PANEL_SECRET_KEY; $cookie_attrs";
+    default "$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY; $cookie_attrs";
 }
 
 map \$http_authorization \$panel_upstream_authorization {
@@ -3879,18 +3892,18 @@ location / {
 EOF
     else
         cat >"$auth_file" <<EOF
-map \$cookie_access \$panel_cookie_allowed {
+map \$cookie_$PANEL_COOKIE_NAME \$panel_cookie_allowed {
     "$PANEL_SECRET_KEY" 1;
     default 0;
 }
 
-map \$arg_access \$panel_allowed {
+map \$arg_$PANEL_COOKIE_NAME \$panel_allowed {
     "$PANEL_SECRET_KEY" 1;
     default \$panel_cookie_allowed;
 }
 
-map \$arg_access \$panel_set_cookie {
-    "$PANEL_SECRET_KEY" "access=$PANEL_SECRET_KEY; $cookie_attrs";
+map \$arg_$PANEL_COOKIE_NAME \$panel_set_cookie {
+    "$PANEL_SECRET_KEY" "$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY; $cookie_attrs";
     default "";
 }
 EOF
@@ -3907,10 +3920,27 @@ location / {
 }
 EOF
     fi
+
+    # OAuth providers redirect back without the cookie: SameSite=Strict withholds it on
+    # cross-site navigation. Every real callback carries both "code" and "state".
+    cat >>"$dir/snippets/panel.conf" <<'EOF'
+
+location ^~ /oauth2/ {
+    if ($arg_code = "") {
+        return 403;
+    }
+    if ($arg_state = "") {
+        return 403;
+    }
+
+    include /etc/angie/snippets/proxy.conf;
+    proxy_pass http://127.0.0.1:3000;
+}
+EOF
 }
 
 angie_has_ipv6() {
-    [ -s /proc/net/if_inet6 ]
+    grep -q . /proc/net/if_inet6 2>/dev/null
 }
 
 angie_http_listens() {
@@ -3927,8 +3957,7 @@ angie_tls_listens() {
     local params="$2"
 
     if [ "$mode" = "xray" ]; then
-        echo "    listen 127.0.0.1:$SELFSTEAL_PORT ssl proxy_protocol$params;"
-        echo "    listen unix:$ANGIE_SOCKET_PATH ssl proxy_protocol$params;"
+        echo "    listen 127.0.0.1:$SELFSTEAL_PORT ssl$params;"
     else
         echo "    listen 443 ssl$params;"
         if angie_has_ipv6; then
@@ -3945,15 +3974,6 @@ write_angie_sites() {
     local site client domain snippet domains=""
 
     {
-        if [ "$mode" != "direct" ]; then
-            cat <<'EOF'
-set_real_ip_from 127.0.0.1;
-set_real_ip_from unix:;
-real_ip_header proxy_protocol;
-
-EOF
-        fi
-
         # A failed challenge is retried after 15 minutes: 4 attempts per hour stay
         # under the Let's Encrypt limit of 5 failed validations per hour
         for site in "$@"; do
@@ -4011,12 +4031,10 @@ write_angie_docker_compose() {
     local mode="$2"
     local container="$3"
 
-    local command_block="" socket_volume="" healthcheck=""
+    local healthcheck=""
     if [ "$mode" = "xray" ]; then
-        command_block="        command: sh -c 'rm -f $ANGIE_SOCKET_PATH && exec angie -g \"daemon off;\"'"$'\n'
-        socket_volume="            - /dev/shm:/dev/shm"$'\n'
         healthcheck="        healthcheck:
-            test: [\"CMD\", \"test\", \"-S\", \"$ANGIE_SOCKET_PATH\"]
+            test: [\"CMD\", \"nc\", \"-z\", \"127.0.0.1\", \"$SELFSTEAL_PORT\"]
             interval: 2s
             timeout: 5s
             retries: 15
@@ -4030,11 +4048,11 @@ services:
         container_name: $container
         hostname: $container
         restart: unless-stopped
-${command_block}        volumes:
+        volumes:
             - ./angie.conf:/etc/angie/angie.conf:ro
             - ./conf.d:/etc/angie/conf.d:ro
             - ./snippets:/etc/angie/snippets:ro
-${socket_volume}            - remnawave-angie-acme:/var/lib/angie/acme
+            - remnawave-angie-acme:/var/lib/angie/acme
         network_mode: host
 ${healthcheck}        logging:
             driver: 'json-file'
@@ -4386,9 +4404,9 @@ get_panel_access_link() {
     local panel_domain=$(get_panel_domain)
 
     if [ "$(get_auth_type)" = "cookie" ]; then
-        # For cookie-auth extract secret key from credentials URL
-        local secret_key=$(grep "PANEL URL:" "$credentials_file" | grep -oP 'access=\K[^&\s]+')
-        echo "https://${panel_domain}:8443/auth/login?access=${secret_key}"
+        # For cookie-auth reuse the secret query from credentials URL
+        local secret_query=$(grep "PANEL URL:" "$credentials_file" | sed 's/.*?//')
+        echo "https://${panel_domain}:8443/auth/login?${secret_query}"
     else
         # For full-auth the Basic Auth credentials are requested by the browser
         echo "https://${panel_domain}:8443/auth/login"
@@ -5918,7 +5936,7 @@ view_logs() {
 
 
 generate_full_auth_secrets() {
-    PANEL_SECRET_KEY=$(openssl rand -hex 32 | tr -d '\n')
+    generate_panel_access_secret
     ANGIE_AUTH_USER=$(generate_readable_login)
     ANGIE_AUTH_PASSWORD=$(generate_secure_password 25)
 }
@@ -6002,12 +6020,12 @@ display_full_auth_results() {
 # Including module: cookie-auth.sh
 
 generate_cookie_auth_secrets() {
-  PANEL_SECRET_KEY=$(openssl rand -hex 32 | tr -d '\n')
+  generate_panel_access_secret
 }
 
 save_credentials_cookie_auth() {
   CREDENTIALS_FILE="$REMNAWAVE_DIR/credentials.txt"
-  echo "PANEL URL: https://$PANEL_DOMAIN/auth/login?access=$PANEL_SECRET_KEY" >>"$CREDENTIALS_FILE"
+  echo "PANEL URL: https://$PANEL_DOMAIN/auth/login?$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY" >>"$CREDENTIALS_FILE"
   echo >>"$CREDENTIALS_FILE"
   echo "REMNAWAVE ADMIN USERNAME: $SUPERADMIN_USERNAME" >>"$CREDENTIALS_FILE"
   echo "REMNAWAVE ADMIN PASSWORD: $SUPERADMIN_PASSWORD" >>"$CREDENTIALS_FILE"
@@ -6017,7 +6035,7 @@ save_credentials_cookie_auth() {
 
 display_cookie_auth_results() {
   local installation_type="${1:-panel}" # Default to panel if not specified
-  local secure_panel_url="https://$PANEL_DOMAIN/auth/login?access=$PANEL_SECRET_KEY"
+  local secure_panel_url="https://$PANEL_DOMAIN/auth/login?$PANEL_COOKIE_NAME=$PANEL_SECRET_KEY"
 
   # Calculate width based on longest line
   local max_width=${#secure_panel_url}
@@ -6448,8 +6466,8 @@ allow_ufw_node_port_from_panel_ip() {
 
 start_node_and_show_results() {
     # Wait for Angie before starting Node
-    if ! wait_for_angie_socket 30; then
-        show_error "$(t error_angie_socket_timeout)"
+    if ! wait_for_angie 30; then
+        show_error "$(t error_angie_timeout)"
         exit 1
     fi
 
@@ -6632,8 +6650,8 @@ EOF
 }
 
 start_node_all_in_one() {
-    if ! wait_for_angie_socket 30; then
-        show_error "$(t error_angie_socket_timeout)"
+    if ! wait_for_angie 30; then
+        show_error "$(t error_angie_timeout)"
         exit 1
     fi
 

@@ -41,11 +41,13 @@ Simplified option, suitable for testing or small loads.
 ```
 Client → Port 443 → Xray (local Remnawave Node)
                       ├─ (VLESS proxy traffic) → Processed by Xray
-                      └─ (Non-VLESS traffic, fallback) → Angie (127.0.0.1:9443)
+                      └─ (Non-VLESS traffic, fallback) → Angie (127.0.0.1:9443, plain TLS)
                                                           ├─ SNI: Panel Domain → Remnawave Panel (port 3000)
                                                           ├─ SNI: Subscription Domain → Subscription Page (port 3010)
                                                           └─ SNI: Selfsteal Domain → 403 Forbidden
 ```
+
+> **Note**: Xray passes connections to Angie without the PROXY protocol (`xver: 0`), so behind Xray the panel and subscription page see `127.0.0.1` as the client address.
 
 > **Note**: In All-in-One mode, if you stop the local Remnawave Node or break the Xray config, the panel and other web services will become inaccessible through domain names.
 
@@ -86,7 +88,7 @@ Client → Port 443 → Xray (local Remnawave Node)
 ## Panel Access Protection
 
 ### Secret link (403)
-- Access via URL with secret key: `https://panel.example.com/auth/login?access=SECRET`
+- Access via URL with secret key: `https://panel.example.com/auth/login?<random name>=<secret>`
 - Angie sets a cookie on first visit
 - Without a valid cookie or parameter, every path returns `403 Forbidden`
 
@@ -96,13 +98,13 @@ Client → Port 443 → Xray (local Remnawave Node)
   2. Remnawave Panel login
 - Without credentials, every path returns `401 Authorization Required`
 - After a successful login Angie sets a session cookie, because the panel UI uses the `Authorization` header for its own API tokens
-- External API clients must send the `access` cookie from a browser session or connect locally to port 3000
+- External API clients must send the session cookie from a browser or connect locally to port 3000
 
 ### Certificates
 - Angie's built-in ACME module requests a separate Let's Encrypt certificate for each domain over HTTP-01 and renews it 30 days before expiry, no cron or restart needed
 - Port 80 must be reachable from the internet, also for renewals. Validation does not pass through Xray and does not need it to be running. Angie also listens on IPv6 if the host has it
 - Certificates are stored in the `remnawave-angie-acme` Docker volume; `--keep-angie-data` preserves it during reinstall
-- Installations made with the Caddy-based version must be reinstalled: the socket path and `?access=` parameter have changed
+- Installations made with the Caddy-based version must be reinstalled: the Xray fallback target has changed
 
 ## Network Configuration
 

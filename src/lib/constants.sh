@@ -117,7 +117,6 @@ SUBSCRIPTION_PAGE_DIR="$REMNAWAVE_DIR/subscription"
 LEGACY_SUBSCRIPTION_PAGE_DIR="$REMNAWAVE_DIR/subscription-page"
 
 ANGIE_IMAGE="docker.angie.software/angie:1.12.4-alpine"
-ANGIE_SOCKET_PATH="/dev/shm/angie.sock"
 ACME_DIRECTORY_URL="https://acme-v02.api.letsencrypt.org/directory"
 SELFSTEAL_PORT="9443"
 

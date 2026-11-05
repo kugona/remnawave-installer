@@ -86,7 +86,7 @@ generate_xray_config() {
         "realitySettings": {
           "target": "$fallback_target",
           "show": false,
-          "xver": 1,
+          "xver": 0,
           "minClientVer": "0.0.0",
           "shortIds": [
             "$short_id"

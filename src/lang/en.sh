@@ -443,9 +443,9 @@ TRANSLATIONS_EN[selfsteal_domain_info]="• Domain:"
 TRANSLATIONS_EN[selfsteal_directory_info]="• Directory:"
 
 # Angie socket and certificates
-TRANSLATIONS_EN[waiting_for_angie_socket]="Waiting for Angie socket to be ready..."
-TRANSLATIONS_EN[error_angie_socket_timeout]="Timeout waiting for Angie socket. Angie may have failed to start."
-TRANSLATIONS_EN[angie_socket_ready]="Angie socket is ready"
+TRANSLATIONS_EN[waiting_for_angie]="Waiting for Angie to be ready..."
+TRANSLATIONS_EN[error_angie_timeout]="Timeout waiting for Angie. Angie may have failed to start."
+TRANSLATIONS_EN[angie_ready]="Angie is ready"
 TRANSLATIONS_EN[waiting_for_certificates]="Waiting for Let's Encrypt certificates..."
 TRANSLATIONS_EN[certificates_ready]="Certificates issued, renewal is automatic"
 TRANSLATIONS_EN[certificates_timeout]="Certificates not issued yet:"

@@ -6,7 +6,7 @@
 
 # Generate full auth specific secrets
 generate_full_auth_secrets() {
-    PANEL_SECRET_KEY=$(openssl rand -hex 32 | tr -d '\n')
+    generate_panel_access_secret
     ANGIE_AUTH_USER=$(generate_readable_login)
     ANGIE_AUTH_PASSWORD=$(generate_secure_password 25)
 }

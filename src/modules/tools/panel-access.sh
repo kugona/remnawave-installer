@@ -82,9 +82,9 @@ get_panel_access_link() {
     local panel_domain=$(get_panel_domain)
 
     if [ "$(get_auth_type)" = "cookie" ]; then
-        # For cookie-auth extract secret key from credentials URL
-        local secret_key=$(grep "PANEL URL:" "$credentials_file" | grep -oP 'access=\K[^&\s]+')
-        echo "https://${panel_domain}:8443/auth/login?access=${secret_key}"
+        # For cookie-auth reuse the secret query from credentials URL
+        local secret_query=$(grep "PANEL URL:" "$credentials_file" | sed 's/.*?//')
+        echo "https://${panel_domain}:8443/auth/login?${secret_query}"
     else
         # For full-auth the Basic Auth credentials are requested by the browser
         echo "https://${panel_domain}:8443/auth/login"

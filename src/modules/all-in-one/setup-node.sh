@@ -51,10 +51,10 @@ EOF
     setup_node_log_rotation
 }
 
-# Start Node container (waits for Angie socket)
+# Start Node container (waits for Angie)
 start_node_all_in_one() {
-    if ! wait_for_angie_socket 30; then
-        show_error "$(t error_angie_socket_timeout)"
+    if ! wait_for_angie 30; then
+        show_error "$(t error_angie_timeout)"
         exit 1
     fi
 

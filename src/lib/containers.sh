@@ -27,23 +27,23 @@ get_node_dir() {
     fi
 }
 
-# Wait for Angie socket to be ready
-wait_for_angie_socket() {
+# Wait for Angie to accept the Xray fallback
+wait_for_angie() {
     local max_wait=${1:-30}
     local elapsed=0
 
-    show_info "$(t waiting_for_angie_socket)" "$ORANGE"
+    show_info "$(t waiting_for_angie)" "$ORANGE"
 
-    while [ ! -S "$ANGIE_SOCKET_PATH" ]; do
+    until (exec 3<>"/dev/tcp/127.0.0.1/$SELFSTEAL_PORT") 2>/dev/null; do
         if [ $elapsed -ge $max_wait ]; then
-            show_error "$(t error_angie_socket_timeout)"
+            show_error "$(t error_angie_timeout)"
             return 1
         fi
         sleep 1
         ((elapsed++))
     done
 
-    show_success "$(t angie_socket_ready)"
+    show_success "$(t angie_ready)"
     return 0
 }
 
