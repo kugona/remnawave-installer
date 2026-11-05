@@ -41,7 +41,7 @@ Simplified option, suitable for testing or small loads.
 ```
 Client → Port 443 → Xray (local Remnawave Node)
                       ├─ (VLESS proxy traffic) → Processed by Xray
-                      └─ (Non-VLESS traffic, fallback) → Angie (/dev/shm/angie.sock)
+                      └─ (Non-VLESS traffic, fallback) → Angie (127.0.0.1:9443)
                                                           ├─ SNI: Panel Domain → Remnawave Panel (port 3000)
                                                           ├─ SNI: Subscription Domain → Subscription Page (port 3010)
                                                           └─ SNI: Selfsteal Domain → 403 Forbidden
@@ -100,7 +100,7 @@ Client → Port 443 → Xray (local Remnawave Node)
 
 ### Certificates
 - Angie's built-in ACME module requests a separate Let's Encrypt certificate for each domain over HTTP-01 and renews it 30 days before expiry, no cron or restart needed
-- Port 80 must be reachable from the internet, also for renewals. Only IPv4 is served: a domain must not have an AAAA record
+- Port 80 must be reachable from the internet, also for renewals. Validation does not pass through Xray and does not need it to be running. Angie also listens on IPv6 if the host has it
 - Certificates are stored in the `remnawave-angie-acme` Docker volume; `--keep-angie-data` preserves it during reinstall
 - Installations made with the Caddy-based version must be reinstalled: the socket path and `?access=` parameter have changed
 

@@ -440,7 +440,6 @@ TRANSLATIONS_RU[container_name_remnawave_node]="Нода Remnawave"
 # Selfsteal
 TRANSLATIONS_RU[selfsteal_installation_stopped]="Установка остановлена"
 TRANSLATIONS_RU[selfsteal_domain_info]="• Домен:"
-TRANSLATIONS_RU[selfsteal_port_info]="• Порт:"
 TRANSLATIONS_RU[selfsteal_directory_info]="• Директория:"
 
 # Angie socket and certificates
@@ -550,8 +549,3 @@ TRANSLATIONS_RU[panel_access_dir_not_found]="Директория панели �
 TRANSLATIONS_RU[panel_access_back]="Вернуться в главное меню"
 
 # Node Xray connection type
-TRANSLATIONS_RU[node_xray_connection_type]="Выберите тип связи с Xray:"
-TRANSLATIONS_RU[node_xray_connection_socket]="Unix Socket (рекомендуется)"
-TRANSLATIONS_RU[node_xray_connection_port]="TCP Port (если вы уже используете порт в конфиге панели)"
-TRANSLATIONS_RU[node_xray_connection_socket_desc]="Использует /dev/shm/angie.sock для внутренней связи"
-TRANSLATIONS_RU[node_xray_connection_port_desc]="Использует TCP порт 9443 для связи с Xray"

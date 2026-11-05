@@ -18,7 +18,7 @@ configure_vless_all_in_one() {
     
     local private_key=$(echo "$keys_result" | cut -d':' -f1)
     
-    generate_xray_config "$config_file" "$SELF_STEAL_DOMAIN" "$ANGIE_SOCKET_PATH" "$private_key"
+    generate_xray_config "$config_file" "$SELF_STEAL_DOMAIN" "127.0.0.1:$SELFSTEAL_PORT" "$private_key"
     
     # Read the generated config
     local xray_config=$(cat "$config_file")

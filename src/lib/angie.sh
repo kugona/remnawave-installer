@@ -237,21 +237,50 @@ EOF
     fi
 }
 
+# Let's Encrypt prefers IPv6 when a domain has an AAAA record, so also listen on it.
+# Binding [::] fails on hosts with IPv6 disabled, hence the check.
+angie_has_ipv6() {
+    [ -s /proc/net/if_inet6 ]
+}
+
+# Print "listen" lines for port 80
+angie_http_listens() {
+    local params="$1"
+
+    echo "    listen 80$params;"
+    if angie_has_ipv6; then
+        echo "    listen [::]:80$params;"
+    fi
+}
+
+# Print "listen" lines for TLS. Behind Xray both the port and the socket are served,
+# so the fallback works whichever of them the "target" in the panel's Xray config uses.
+angie_tls_listens() {
+    local mode="$1"
+    local params="$2"
+
+    if [ "$mode" = "xray" ]; then
+        echo "    listen 127.0.0.1:$SELFSTEAL_PORT ssl proxy_protocol$params;"
+        echo "    listen unix:$ANGIE_SOCKET_PATH ssl proxy_protocol$params;"
+    else
+        echo "    listen 443 ssl$params;"
+        if angie_has_ipv6; then
+            echo "    listen [::]:443 ssl$params;"
+        fi
+    fi
+}
+
 # Write ACME clients and server blocks.
-#   mode    - direct (port 443), socket (behind Xray) or port (behind Xray)
+#   mode    - direct (Angie owns port 443) or xray (Xray owns port 443 and falls back)
 #   sites   - "client:domain:snippet", one certificate per client so that the
 #             selfsteal certificate never reveals the panel and subscription domains
+# Certificates are validated over port 80 and never pass through Xray.
 write_angie_sites() {
     local dir="$1"
     local mode="$2"
     shift 2
 
-    local listen site client domain snippet domains=""
-    case "$mode" in
-    socket) listen="unix:$ANGIE_SOCKET_PATH ssl proxy_protocol" ;;
-    port) listen="127.0.0.1:$SELFSTEAL_PORT ssl proxy_protocol" ;;
-    *) listen="443 ssl" ;;
-    esac
+    local site client domain snippet domains=""
 
     {
         if [ "$mode" != "direct" ]; then
@@ -274,21 +303,21 @@ EOF
         cat <<EOF
 
 server {
-    listen 80 default_server;
+$(angie_http_listens " default_server")
     server_name _;
     include /etc/angie/snippets/errors.conf;
     include /etc/angie/snippets/deny.conf;
 }
 
 server {
-    listen 80;
+$(angie_http_listens "")
     server_name$domains;
     include /etc/angie/snippets/errors.conf;
     include /etc/angie/snippets/redirect.conf;
 }
 
 server {
-    listen $listen default_server;
+$(angie_tls_listens "$mode" " default_server")
     server_name _;
     ssl_reject_handshake on;
 }
@@ -299,7 +328,7 @@ EOF
             cat <<EOF
 
 server {
-    listen $listen;
+$(angie_tls_listens "$mode" "")
     http2 on;
     server_name $domain;
 
@@ -321,8 +350,7 @@ write_angie_docker_compose() {
     local container="$3"
 
     local command_block="" socket_volume="" healthcheck=""
-    case "$mode" in
-    socket)
+    if [ "$mode" = "xray" ]; then
         command_block="        command: sh -c 'rm -f $ANGIE_SOCKET_PATH && exec angie -g \"daemon off;\"'"$'\n'
         socket_volume="            - /dev/shm:/dev/shm"$'\n'
         healthcheck="        healthcheck:
@@ -331,16 +359,7 @@ write_angie_docker_compose() {
             timeout: 5s
             retries: 15
             start_period: 5s"$'\n'
-        ;;
-    port)
-        healthcheck="        healthcheck:
-            test: [\"CMD\", \"nc\", \"-z\", \"127.0.0.1\", \"$SELFSTEAL_PORT\"]
-            interval: 2s
-            timeout: 5s
-            retries: 15
-            start_period: 5s"$'\n'
-        ;;
-    esac
+    fi
 
     cat >"$dir/docker-compose.yml" <<EOF
 services:
@@ -384,18 +403,18 @@ setup_angie_panel_only() {
     write_angie_docker_compose "$dir" "direct" "angie-remnawave"
 }
 
-# Setting up Angie for All-in-One: Xray owns port 443 and falls back to the socket
+# Setting up Angie for All-in-One: Xray owns port 443 and falls back to Angie
 setup_angie_all_in_one() {
     local auth_type="$1"
     local dir="$REMNAWAVE_DIR/angie"
 
     write_angie_base_config "$dir"
     write_angie_panel_auth "$dir" "$auth_type"
-    write_angie_sites "$dir" "socket" \
+    write_angie_sites "$dir" "xray" \
         "panel:$PANEL_DOMAIN:panel" \
         "subscription:$SUB_DOMAIN:subscription" \
         "selfsteal:$SELF_STEAL_DOMAIN:deny"
-    write_angie_docker_compose "$dir" "socket" "angie-remnawave"
+    write_angie_docker_compose "$dir" "xray" "angie-remnawave"
 }
 
 start_angie() {
@@ -433,6 +452,8 @@ wait_for_angie_certificates() {
         if [ $elapsed -ge $max_wait ]; then
             show_warning "$(t certificates_timeout) ${pending[*]}"
             show_warning "$(t certificates_timeout_hint) cd $dir && docker compose logs angie"
+            docker compose -f "$dir/docker-compose.yml" logs --no-log-prefix --tail=200 angie 2>&1 |
+                grep -E 'acme_client|ACME' | tail -n 10
             return 1
         fi
 

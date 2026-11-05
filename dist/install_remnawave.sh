@@ -541,7 +541,6 @@ TRANSLATIONS_EN[container_name_remnawave_node]="Remnawave Node"
 
 TRANSLATIONS_EN[selfsteal_installation_stopped]="Installation stopped"
 TRANSLATIONS_EN[selfsteal_domain_info]="• Domain:"
-TRANSLATIONS_EN[selfsteal_port_info]="• Port:"
 TRANSLATIONS_EN[selfsteal_directory_info]="• Directory:"
 
 TRANSLATIONS_EN[waiting_for_angie_socket]="Waiting for Angie socket to be ready..."
@@ -645,11 +644,6 @@ TRANSLATIONS_EN[panel_access_disabling]="Disabling emergency access..."
 TRANSLATIONS_EN[panel_access_dir_not_found]="Panel directory not found. Install panel first."
 TRANSLATIONS_EN[panel_access_back]="Back to main menu"
 
-TRANSLATIONS_EN[node_xray_connection_type]="Select Xray connection type:"
-TRANSLATIONS_EN[node_xray_connection_socket]="Unix Socket (recommended)"
-TRANSLATIONS_EN[node_xray_connection_port]="TCP Port (if you already used port mode in panel)"
-TRANSLATIONS_EN[node_xray_connection_socket_desc]="Uses /dev/shm/angie.sock for internal communication"
-TRANSLATIONS_EN[node_xray_connection_port_desc]="Uses TCP port 9443 for Xray connection"
 
 # Including module: ru.sh
 
@@ -1048,7 +1042,6 @@ TRANSLATIONS_RU[container_name_remnawave_node]="Нода Remnawave"
 
 TRANSLATIONS_RU[selfsteal_installation_stopped]="Установка остановлена"
 TRANSLATIONS_RU[selfsteal_domain_info]="• Домен:"
-TRANSLATIONS_RU[selfsteal_port_info]="• Порт:"
 TRANSLATIONS_RU[selfsteal_directory_info]="• Директория:"
 
 TRANSLATIONS_RU[waiting_for_angie_socket]="Ожидание готовности сокета Angie..."
@@ -1152,11 +1145,6 @@ TRANSLATIONS_RU[panel_access_disabling]="Выключение аварийног
 TRANSLATIONS_RU[panel_access_dir_not_found]="Директория панели не найдена. Сначала установите панель."
 TRANSLATIONS_RU[panel_access_back]="Вернуться в главное меню"
 
-TRANSLATIONS_RU[node_xray_connection_type]="Выберите тип связи с Xray:"
-TRANSLATIONS_RU[node_xray_connection_socket]="Unix Socket (рекомендуется)"
-TRANSLATIONS_RU[node_xray_connection_port]="TCP Port (если вы уже используете порт в конфиге панели)"
-TRANSLATIONS_RU[node_xray_connection_socket_desc]="Использует /dev/shm/angie.sock для внутренней связи"
-TRANSLATIONS_RU[node_xray_connection_port_desc]="Использует TCP порт 9443 для связи с Xray"
 
 # Including module: system.sh
 
@@ -3587,7 +3575,7 @@ generate_vless_keys() {
 generate_xray_config() {
   local config_file="$1"
   local self_steal_domain="$2"
-  local socket_path="$3"
+  local fallback_target="$3"
   local private_key="$4"
 
   local short_id=$(openssl rand -hex 8)
@@ -3627,7 +3615,7 @@ generate_xray_config() {
         "network": "tcp",
         "security": "reality",
         "realitySettings": {
-          "target": "$socket_path",
+          "target": "$fallback_target",
           "show": false,
           "xver": 1,
           "minClientVer": "0.0.0",
@@ -3921,17 +3909,40 @@ EOF
     fi
 }
 
+angie_has_ipv6() {
+    [ -s /proc/net/if_inet6 ]
+}
+
+angie_http_listens() {
+    local params="$1"
+
+    echo "    listen 80$params;"
+    if angie_has_ipv6; then
+        echo "    listen [::]:80$params;"
+    fi
+}
+
+angie_tls_listens() {
+    local mode="$1"
+    local params="$2"
+
+    if [ "$mode" = "xray" ]; then
+        echo "    listen 127.0.0.1:$SELFSTEAL_PORT ssl proxy_protocol$params;"
+        echo "    listen unix:$ANGIE_SOCKET_PATH ssl proxy_protocol$params;"
+    else
+        echo "    listen 443 ssl$params;"
+        if angie_has_ipv6; then
+            echo "    listen [::]:443 ssl$params;"
+        fi
+    fi
+}
+
 write_angie_sites() {
     local dir="$1"
     local mode="$2"
     shift 2
 
-    local listen site client domain snippet domains=""
-    case "$mode" in
-    socket) listen="unix:$ANGIE_SOCKET_PATH ssl proxy_protocol" ;;
-    port) listen="127.0.0.1:$SELFSTEAL_PORT ssl proxy_protocol" ;;
-    *) listen="443 ssl" ;;
-    esac
+    local site client domain snippet domains=""
 
     {
         if [ "$mode" != "direct" ]; then
@@ -3954,21 +3965,21 @@ EOF
         cat <<EOF
 
 server {
-    listen 80 default_server;
+$(angie_http_listens " default_server")
     server_name _;
     include /etc/angie/snippets/errors.conf;
     include /etc/angie/snippets/deny.conf;
 }
 
 server {
-    listen 80;
+$(angie_http_listens "")
     server_name$domains;
     include /etc/angie/snippets/errors.conf;
     include /etc/angie/snippets/redirect.conf;
 }
 
 server {
-    listen $listen default_server;
+$(angie_tls_listens "$mode" " default_server")
     server_name _;
     ssl_reject_handshake on;
 }
@@ -3979,7 +3990,7 @@ EOF
             cat <<EOF
 
 server {
-    listen $listen;
+$(angie_tls_listens "$mode" "")
     http2 on;
     server_name $domain;
 
@@ -4001,8 +4012,7 @@ write_angie_docker_compose() {
     local container="$3"
 
     local command_block="" socket_volume="" healthcheck=""
-    case "$mode" in
-    socket)
+    if [ "$mode" = "xray" ]; then
         command_block="        command: sh -c 'rm -f $ANGIE_SOCKET_PATH && exec angie -g \"daemon off;\"'"$'\n'
         socket_volume="            - /dev/shm:/dev/shm"$'\n'
         healthcheck="        healthcheck:
@@ -4011,16 +4021,7 @@ write_angie_docker_compose() {
             timeout: 5s
             retries: 15
             start_period: 5s"$'\n'
-        ;;
-    port)
-        healthcheck="        healthcheck:
-            test: [\"CMD\", \"nc\", \"-z\", \"127.0.0.1\", \"$SELFSTEAL_PORT\"]
-            interval: 2s
-            timeout: 5s
-            retries: 15
-            start_period: 5s"$'\n'
-        ;;
-    esac
+    fi
 
     cat >"$dir/docker-compose.yml" <<EOF
 services:
@@ -4069,11 +4070,11 @@ setup_angie_all_in_one() {
 
     write_angie_base_config "$dir"
     write_angie_panel_auth "$dir" "$auth_type"
-    write_angie_sites "$dir" "socket" \
+    write_angie_sites "$dir" "xray" \
         "panel:$PANEL_DOMAIN:panel" \
         "subscription:$SUB_DOMAIN:subscription" \
         "selfsteal:$SELF_STEAL_DOMAIN:deny"
-    write_angie_docker_compose "$dir" "socket" "angie-remnawave"
+    write_angie_docker_compose "$dir" "xray" "angie-remnawave"
 }
 
 start_angie() {
@@ -4109,6 +4110,8 @@ wait_for_angie_certificates() {
         if [ $elapsed -ge $max_wait ]; then
             show_warning "$(t certificates_timeout) ${pending[*]}"
             show_warning "$(t certificates_timeout_hint) cd $dir && docker compose logs angie"
+            docker compose -f "$dir/docker-compose.yml" logs --no-log-prefix --tail=200 angie 2>&1 |
+                grep -E 'acme_client|ACME' | tail -n 10
             return 1
         fi
 
@@ -6130,7 +6133,7 @@ configure_vless_panel_only() {
 
     local private_key=$(echo "$keys_result" | cut -d':' -f1)
 
-    generate_xray_config "$config_file" "$SELF_STEAL_DOMAIN" "$ANGIE_SOCKET_PATH" "$private_key"
+    generate_xray_config "$config_file" "$SELF_STEAL_DOMAIN" "127.0.0.1:$SELFSTEAL_PORT" "$private_key"
 
     # Read the generated config
     local xray_config=$(cat "$config_file")
@@ -6321,14 +6324,12 @@ install_panel_only() {
 
 
 setup_selfsteal() {
-    local connection_type="${1:-socket}"
-
     mkdir -p "$SELFSTEAL_DIR"
     cd "$SELFSTEAL_DIR"
 
     write_angie_base_config "$SELFSTEAL_DIR"
-    write_angie_sites "$SELFSTEAL_DIR" "$connection_type" "selfsteal:$SELF_STEAL_DOMAIN:deny"
-    write_angie_docker_compose "$SELFSTEAL_DIR" "$connection_type" "angie-selfsteal"
+    write_angie_sites "$SELFSTEAL_DIR" "xray" "selfsteal:$SELF_STEAL_DOMAIN:deny"
+    write_angie_docker_compose "$SELFSTEAL_DIR" "xray" "angie-selfsteal"
 
     if ! start_container "$SELFSTEAL_DIR" "Angie"; then
         show_error "$(t selfsteal_installation_stopped)"
@@ -6341,46 +6342,12 @@ setup_selfsteal() {
 
     if [ "$ANGIE_STATUS" = "running" ]; then
         echo -e "${LIGHT_GREEN}$(t selfsteal_domain_info) ${BOLD_GREEN}$SELF_STEAL_DOMAIN${NC}"
-        if [ "$connection_type" = "port" ]; then
-            echo -e "${LIGHT_GREEN}$(t selfsteal_port_info) ${BOLD_GREEN}$SELFSTEAL_PORT${NC}"
-        fi
         echo -e "${LIGHT_GREEN}$(t selfsteal_directory_info) ${BOLD_GREEN}$SELFSTEAL_DIR${NC}"
         echo
     fi
 }
 
 # Including module: node.sh
-
-XRAY_CONNECTION_TYPE=""
-
-select_xray_connection_type() {
-    echo -e "${BOLD_BLUE}$(t node_xray_connection_type)${NC}"
-    echo
-    echo -e "  ${BOLD_GREEN}1)${NC} $(t node_xray_connection_socket)"
-    echo -e "     ${YELLOW}$(t node_xray_connection_socket_desc)${NC}"
-    echo
-    echo -e "  ${BOLD_GREEN}2)${NC} $(t node_xray_connection_port)"
-    echo -e "     ${YELLOW}$(t node_xray_connection_port_desc)${NC}"
-    echo
-
-    while true; do
-        read -p "$(echo -e "${ORANGE}$(t main_menu_select_option) ${NC}")" choice
-        case $choice in
-            1)
-                XRAY_CONNECTION_TYPE="socket"
-                break
-                ;;
-            2)
-                XRAY_CONNECTION_TYPE="port"
-                break
-                ;;
-            *)
-                echo -e "${BOLD_RED}$(t error_invalid_choice)${NC}"
-                ;;
-        esac
-    done
-    echo
-}
 
 create_node_docker_compose() {
     local certificate="$1"
@@ -6480,12 +6447,10 @@ allow_ufw_node_port_from_panel_ip() {
 }
 
 start_node_and_show_results() {
-    # Wait for Angie socket before starting Node (only for socket mode)
-    if [ "$XRAY_CONNECTION_TYPE" = "socket" ]; then
-        if ! wait_for_angie_socket 30; then
-            show_error "$(t error_angie_socket_timeout)"
-            exit 1
-        fi
+    # Wait for Angie before starting Node
+    if ! wait_for_angie_socket 30; then
+        show_error "$(t error_angie_socket_timeout)"
+        exit 1
     fi
 
     if ! start_container "$REMNANODE_DIR" "Remnawave Node"; then
@@ -6514,9 +6479,6 @@ setup_node() {
 
     check_node_ports
 
-    # Select Xray connection type (socket or port)
-    select_xray_connection_type
-
     collect_node_ssl_certificate
 
     # Create node docker-compose
@@ -6524,16 +6486,15 @@ setup_node() {
 
     setup_node_log_rotation
 
-    # Setup and start Angie (in selfsteal.sh) with selected connection type
-    setup_selfsteal "$XRAY_CONNECTION_TYPE"
+    # Setup and start Angie (in selfsteal.sh)
+    setup_selfsteal
 
-    # Start node (waits for Angie socket if using socket mode)
+    # Start node (waits for Angie)
     start_node_and_show_results
 
     unset CERTIFICATE
     unset NODE_PORT
     unset SELF_STEAL_DOMAIN
-    unset XRAY_CONNECTION_TYPE
 
     echo -e "\n${BOLD_GREEN}$(t node_press_enter_return)${NC}"
     read -r
@@ -6555,7 +6516,7 @@ configure_vless_all_in_one() {
     
     local private_key=$(echo "$keys_result" | cut -d':' -f1)
     
-    generate_xray_config "$config_file" "$SELF_STEAL_DOMAIN" "$ANGIE_SOCKET_PATH" "$private_key"
+    generate_xray_config "$config_file" "$SELF_STEAL_DOMAIN" "127.0.0.1:$SELFSTEAL_PORT" "$private_key"
     
     # Read the generated config
     local xray_config=$(cat "$config_file")

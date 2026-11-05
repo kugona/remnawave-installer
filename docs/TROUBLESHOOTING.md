@@ -63,7 +63,7 @@ Common issues and solutions for the remnawave-installer.
 
 **Solutions:**
 1. **Emergency Access** (via script menu): Opens direct access on port 8443
-2. **Manual fix**: In `/opt/remnawave/angie/conf.d/sites.conf`, change `listen unix:/dev/shm/angie.sock ssl proxy_protocol` to `listen 443 ssl` after stopping the node, then restart Angie
+2. **Manual fix**: In `/opt/remnawave/angie/conf.d/sites.conf`, replace the `listen 127.0.0.1:9443 ...` and `listen unix:/dev/shm/angie.sock ...` lines with `listen 443 ssl` after stopping the node, then restart Angie
 
 ## Service Management
 

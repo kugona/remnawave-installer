@@ -44,7 +44,7 @@ generate_vless_keys() {
 generate_xray_config() {
   local config_file="$1"
   local self_steal_domain="$2"
-  local socket_path="$3"
+  local fallback_target="$3"
   local private_key="$4"
 
   local short_id=$(openssl rand -hex 8)
@@ -84,7 +84,7 @@ generate_xray_config() {
         "network": "tcp",
         "security": "reality",
         "realitySettings": {
-          "target": "$socket_path",
+          "target": "$fallback_target",
           "show": false,
           "xver": 1,
           "minClientVer": "0.0.0",

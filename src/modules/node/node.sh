@@ -2,39 +2,6 @@
 #                              REMNAWAVE NODE INSTALLATION (Node-Only)
 # ===================================================================================
 
-# Global variable for connection type (socket or port)
-XRAY_CONNECTION_TYPE=""
-
-# Select Xray connection type (socket or port)
-select_xray_connection_type() {
-    echo -e "${BOLD_BLUE}$(t node_xray_connection_type)${NC}"
-    echo
-    echo -e "  ${BOLD_GREEN}1)${NC} $(t node_xray_connection_socket)"
-    echo -e "     ${YELLOW}$(t node_xray_connection_socket_desc)${NC}"
-    echo
-    echo -e "  ${BOLD_GREEN}2)${NC} $(t node_xray_connection_port)"
-    echo -e "     ${YELLOW}$(t node_xray_connection_port_desc)${NC}"
-    echo
-
-    while true; do
-        read -p "$(echo -e "${ORANGE}$(t main_menu_select_option) ${NC}")" choice
-        case $choice in
-            1)
-                XRAY_CONNECTION_TYPE="socket"
-                break
-                ;;
-            2)
-                XRAY_CONNECTION_TYPE="port"
-                break
-                ;;
-            *)
-                echo -e "${BOLD_RED}$(t error_invalid_choice)${NC}"
-                ;;
-        esac
-    done
-    echo
-}
-
 # Create docker-compose for Node
 create_node_docker_compose() {
     local certificate="$1"
@@ -136,12 +103,10 @@ allow_ufw_node_port_from_panel_ip() {
 
 # Start node container and show results
 start_node_and_show_results() {
-    # Wait for Angie socket before starting Node (only for socket mode)
-    if [ "$XRAY_CONNECTION_TYPE" = "socket" ]; then
-        if ! wait_for_angie_socket 30; then
-            show_error "$(t error_angie_socket_timeout)"
-            exit 1
-        fi
+    # Wait for Angie before starting Node
+    if ! wait_for_angie_socket 30; then
+        show_error "$(t error_angie_socket_timeout)"
+        exit 1
     fi
 
     if ! start_container "$REMNANODE_DIR" "Remnawave Node"; then
@@ -170,9 +135,6 @@ setup_node() {
 
     check_node_ports
 
-    # Select Xray connection type (socket or port)
-    select_xray_connection_type
-
     collect_node_ssl_certificate
 
     # Create node docker-compose
@@ -180,16 +142,15 @@ setup_node() {
 
     setup_node_log_rotation
 
-    # Setup and start Angie (in selfsteal.sh) with selected connection type
-    setup_selfsteal "$XRAY_CONNECTION_TYPE"
+    # Setup and start Angie (in selfsteal.sh)
+    setup_selfsteal
 
-    # Start node (waits for Angie socket if using socket mode)
+    # Start node (waits for Angie)
     start_node_and_show_results
 
     unset CERTIFICATE
     unset NODE_PORT
     unset SELF_STEAL_DOMAIN
-    unset XRAY_CONNECTION_TYPE
 
     echo -e "\n${BOLD_GREEN}$(t node_press_enter_return)${NC}"
     read -r

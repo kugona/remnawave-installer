@@ -63,7 +63,7 @@
 
 **Решения:**
 1. **Экстренный доступ** (через меню скрипта): Открывает прямой доступ на порту 8443
-2. **Ручное исправление**: Остановив ноду, в `/opt/remnawave/angie/conf.d/sites.conf` замените `listen unix:/dev/shm/angie.sock ssl proxy_protocol` на `listen 443 ssl` и перезапустите Angie
+2. **Ручное исправление**: Остановив ноду, в `/opt/remnawave/angie/conf.d/sites.conf` замените строки `listen 127.0.0.1:9443 ...` и `listen unix:/dev/shm/angie.sock ...` на `listen 443 ssl` и перезапустите Angie
 
 ## Управление сервисами
 
