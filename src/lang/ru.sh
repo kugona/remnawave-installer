@@ -442,6 +442,17 @@ TRANSLATIONS_RU[selfsteal_installation_stopped]="Установка остано
 TRANSLATIONS_RU[selfsteal_domain_info]="• Домен:"
 TRANSLATIONS_RU[selfsteal_directory_info]="• Директория:"
 
+# Node VLESS transport
+TRANSLATIONS_RU[node_vless_mode_title]="Для какого VLESS настроить Angie?"
+TRANSLATIONS_RU[node_vless_mode_reality]="REALITY"
+TRANSLATIONS_RU[node_vless_mode_reality_desc]="Angie отдаёт TLS на 127.0.0.1:9443 со своим сертификатом, Xray использует его как target для REALITY"
+TRANSLATIONS_RU[node_vless_mode_tls]="TLS"
+TRANSLATIONS_RU[node_vless_mode_tls_desc]="Xray сам отдаёт TLS на порту 443 с сертификатом от Angie и делает fallback в Angie на 127.0.0.1:9443 по обычному HTTP"
+TRANSLATIONS_RU[node_tls_certificate_missing]="Без сертификата Xray не запустит inbound с TLS. Когда Angie его выпустит, перезапустите ноду: cd /opt/remnanode && docker compose restart"
+TRANSLATIONS_RU[node_tls_profile_title]="Inbound для профиля конфигурации в панели (VLESS TLS):"
+TRANSLATIONS_RU[node_tls_profile_hint]="Пути указаны внутри контейнера remnanode, том с сертификатами уже подключён. Клиентов и flow добавьте в панели по необходимости."
+TRANSLATIONS_RU[node_tls_profile_host]="В хосте панели укажите security TLS и SNI:"
+
 # Angie socket and certificates
 TRANSLATIONS_RU[waiting_for_angie]="Ожидание готовности Angie..."
 TRANSLATIONS_RU[error_angie_timeout]="Превышено время ожидания Angie. Возможно, Angie не запустился."

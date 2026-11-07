@@ -2,9 +2,52 @@
 #                              REMNAWAVE NODE INSTALLATION (Node-Only)
 # ===================================================================================
 
+# Select which VLESS transport Angie is set up for
+select_node_vless_mode() {
+    echo -e "${BOLD_BLUE}$(t node_vless_mode_title)${NC}"
+    echo
+    echo -e "  ${BOLD_GREEN}1)${NC} $(t node_vless_mode_reality)"
+    echo -e "     ${YELLOW}$(t node_vless_mode_reality_desc)${NC}"
+    echo
+    echo -e "  ${BOLD_GREEN}2)${NC} $(t node_vless_mode_tls)"
+    echo -e "     ${YELLOW}$(t node_vless_mode_tls_desc)${NC}"
+    echo
+
+    while true; do
+        read -p "$(echo -e "${ORANGE}$(t main_menu_select_option) ${NC}")" choice
+        case $choice in
+        1)
+            NODE_VLESS_MODE="reality"
+            break
+            ;;
+        2)
+            NODE_VLESS_MODE="tls"
+            break
+            ;;
+        *)
+            echo -e "${BOLD_RED}$(t error_invalid_choice)${NC}"
+            ;;
+        esac
+    done
+    echo
+}
+
 # Create docker-compose for Node
 create_node_docker_compose() {
     local certificate="$1"
+    local vless_mode="${2:-reality}"
+
+    # VLESS TLS: Xray reads the certificate Angie issues and renews. It reloads
+    # certificate files every hour, so renewals need no restart.
+    local acme_volume="" acme_volume_definition=""
+    if [ "$vless_mode" = "tls" ]; then
+        acme_volume="            - $ANGIE_ACME_VOLUME:$ANGIE_ACME_DIR:ro"$'\n'
+        acme_volume_definition="
+volumes:
+    $ANGIE_ACME_VOLUME:
+        external: true
+        name: $ANGIE_ACME_VOLUME"
+    fi
 
     mkdir -p "$REMNANODE_DIR"
     cd "$REMNANODE_DIR"
@@ -29,11 +72,12 @@ services:
         volumes:
             - /dev/shm:/dev/shm
             - /var/log/remnanode:/var/log/remnanode
-        logging:
+${acme_volume}        logging:
             driver: 'json-file'
             options:
                 max-size: '100m'
                 max-file: '5'
+${acme_volume_definition}
 EOF
 
     create_makefile "$REMNANODE_DIR"
@@ -119,6 +163,50 @@ start_node_and_show_results() {
     echo
 }
 
+# Print the inbound to use in the panel's config profile for a VLESS TLS node
+show_node_tls_inbound() {
+    local cert_dir="$ANGIE_ACME_DIR/selfsteal"
+
+    echo -e "${BOLD_GREEN}$(t node_tls_profile_title)${NC}"
+    echo -e "${YELLOW}$(t node_tls_profile_hint)${NC}"
+    echo
+    cat <<EOF
+{
+  "tag": "VLESS_TLS",
+  "port": 443,
+  "protocol": "vless",
+  "settings": {
+    "clients": [],
+    "decryption": "none",
+    "fallbacks": [
+      { "dest": "127.0.0.1:$SELFSTEAL_PORT", "xver": 0 }
+    ]
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic"]
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "tls",
+    "tlsSettings": {
+      "serverName": "$SELF_STEAL_DOMAIN",
+      "alpn": ["h2", "http/1.1"],
+      "certificates": [
+        {
+          "certificateFile": "$cert_dir/certificate.pem",
+          "keyFile": "$cert_dir/private.key"
+        }
+      ]
+    }
+  }
+}
+EOF
+    echo
+    echo -e "${YELLOW}$(t node_tls_profile_host) ${BOLD_GREEN}$SELF_STEAL_DOMAIN${NC}"
+    echo
+}
+
 setup_node() {
     clear
 
@@ -135,22 +223,29 @@ setup_node() {
 
     check_node_ports
 
+    select_node_vless_mode
+
     collect_node_ssl_certificate
 
     # Create node docker-compose
-    create_node_docker_compose "$CERTIFICATE"
+    create_node_docker_compose "$CERTIFICATE" "$NODE_VLESS_MODE"
 
     setup_node_log_rotation
 
-    # Setup and start Angie (in selfsteal.sh)
-    setup_selfsteal
+    # Setup and start Angie (in selfsteal.sh); it creates the certificate volume first
+    setup_selfsteal "$NODE_VLESS_MODE"
 
     # Start node (waits for Angie)
     start_node_and_show_results
 
+    if [ "$NODE_VLESS_MODE" = "tls" ]; then
+        show_node_tls_inbound
+    fi
+
     unset CERTIFICATE
     unset NODE_PORT
     unset SELF_STEAL_DOMAIN
+    unset NODE_VLESS_MODE
 
     echo -e "\n${BOLD_GREEN}$(t node_press_enter_return)${NC}"
     read -r

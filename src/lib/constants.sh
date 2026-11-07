@@ -118,6 +118,9 @@ LEGACY_SUBSCRIPTION_PAGE_DIR="$REMNAWAVE_DIR/subscription-page"
 
 ANGIE_IMAGE="docker.angie.software/angie:1.12.4-alpine"
 ACME_DIRECTORY_URL="https://acme-v02.api.letsencrypt.org/directory"
+# Angie keeps certificates here; the VLESS TLS node mounts the same volume read-only
+ANGIE_ACME_VOLUME="remnawave-angie-acme"
+ANGIE_ACME_DIR="/var/lib/angie/acme"
 SELFSTEAL_PORT="9443"
 
 # Legacy directories (will be removed after refactoring)

@@ -16,7 +16,9 @@ Recommended for better reliability and flexibility.
 
 **Node Server:**
 - Remnawave Node (with Xray)
-- Angie for Selfsteal domain
+- Angie for Selfsteal domain. The installer asks which VLESS transport to set it up for:
+  - **REALITY**: Angie serves TLS on `127.0.0.1:9443`, Xray uses it as the REALITY `target`
+  - **TLS**: Xray serves TLS on port 443 with the certificate issued by Angie (mounted read-only into `remnanode`) and falls back to Angie on `127.0.0.1:9443` over plain HTTP. Angie serves no HTTPS. The installer prints the inbound for the panel profile
 
 **DNS Configuration:**
 - Panel and Subscription domains → Panel server IP

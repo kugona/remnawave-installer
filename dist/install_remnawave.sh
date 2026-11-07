@@ -110,6 +110,8 @@ LEGACY_SUBSCRIPTION_PAGE_DIR="$REMNAWAVE_DIR/subscription-page"
 
 ANGIE_IMAGE="docker.angie.software/angie:1.12.4-alpine"
 ACME_DIRECTORY_URL="https://acme-v02.api.letsencrypt.org/directory"
+ANGIE_ACME_VOLUME="remnawave-angie-acme"
+ANGIE_ACME_DIR="/var/lib/angie/acme"
 SELFSTEAL_PORT="9443"
 
 SELFSTEAL_DIR="/opt/remnanode/selfsteal"
@@ -541,6 +543,16 @@ TRANSLATIONS_EN[container_name_remnawave_node]="Remnawave Node"
 TRANSLATIONS_EN[selfsteal_installation_stopped]="Installation stopped"
 TRANSLATIONS_EN[selfsteal_domain_info]="• Domain:"
 TRANSLATIONS_EN[selfsteal_directory_info]="• Directory:"
+
+TRANSLATIONS_EN[node_vless_mode_title]="Set up Angie for which VLESS transport?"
+TRANSLATIONS_EN[node_vless_mode_reality]="REALITY"
+TRANSLATIONS_EN[node_vless_mode_reality_desc]="Angie serves TLS on 127.0.0.1:9443 with its own certificate, Xray uses it as the REALITY target"
+TRANSLATIONS_EN[node_vless_mode_tls]="TLS"
+TRANSLATIONS_EN[node_vless_mode_tls_desc]="Xray serves TLS on port 443 with the certificate issued by Angie and falls back to Angie on 127.0.0.1:9443 over plain HTTP"
+TRANSLATIONS_EN[node_tls_certificate_missing]="Xray cannot start a TLS inbound without the certificate. Once Angie issues it, restart the node: cd /opt/remnanode && docker compose restart"
+TRANSLATIONS_EN[node_tls_profile_title]="Inbound for the panel's config profile (VLESS TLS):"
+TRANSLATIONS_EN[node_tls_profile_hint]="Paths are inside the remnanode container, the certificate volume is already mounted. Add clients and flow in the panel as needed."
+TRANSLATIONS_EN[node_tls_profile_host]="Use security TLS and SNI in the panel host:"
 
 TRANSLATIONS_EN[waiting_for_angie]="Waiting for Angie to be ready..."
 TRANSLATIONS_EN[error_angie_timeout]="Timeout waiting for Angie. Angie may have failed to start."
@@ -1042,6 +1054,16 @@ TRANSLATIONS_RU[container_name_remnawave_node]="Нода Remnawave"
 TRANSLATIONS_RU[selfsteal_installation_stopped]="Установка остановлена"
 TRANSLATIONS_RU[selfsteal_domain_info]="• Домен:"
 TRANSLATIONS_RU[selfsteal_directory_info]="• Директория:"
+
+TRANSLATIONS_RU[node_vless_mode_title]="Для какого VLESS настроить Angie?"
+TRANSLATIONS_RU[node_vless_mode_reality]="REALITY"
+TRANSLATIONS_RU[node_vless_mode_reality_desc]="Angie отдаёт TLS на 127.0.0.1:9443 со своим сертификатом, Xray использует его как target для REALITY"
+TRANSLATIONS_RU[node_vless_mode_tls]="TLS"
+TRANSLATIONS_RU[node_vless_mode_tls_desc]="Xray сам отдаёт TLS на порту 443 с сертификатом от Angie и делает fallback в Angie на 127.0.0.1:9443 по обычному HTTP"
+TRANSLATIONS_RU[node_tls_certificate_missing]="Без сертификата Xray не запустит inbound с TLS. Когда Angie его выпустит, перезапустите ноду: cd /opt/remnanode && docker compose restart"
+TRANSLATIONS_RU[node_tls_profile_title]="Inbound для профиля конфигурации в панели (VLESS TLS):"
+TRANSLATIONS_RU[node_tls_profile_hint]="Пути указаны внутри контейнера remnanode, том с сертификатами уже подключён. Клиентов и flow добавьте в панели по необходимости."
+TRANSLATIONS_RU[node_tls_profile_host]="В хосте панели укажите security TLS и SNI:"
 
 TRANSLATIONS_RU[waiting_for_angie]="Ожидание готовности Angie..."
 TRANSLATIONS_RU[error_angie_timeout]="Превышено время ожидания Angie. Возможно, Angie не запустился."
@@ -4026,6 +4048,41 @@ EOF
     } >"$dir/conf.d/sites.conf"
 }
 
+write_angie_tls_fallback_sites() {
+    local dir="$1"
+    local client="$2"
+    local domain="$3"
+
+    cat >"$dir/conf.d/sites.conf" <<EOF
+acme_client $client $ACME_DIRECTORY_URL retry_after_error=15m;
+
+server {
+$(angie_http_listens " default_server")
+    server_name _;
+    include /etc/angie/snippets/errors.conf;
+    include /etc/angie/snippets/deny.conf;
+}
+
+server {
+$(angie_http_listens "")
+    server_name $domain;
+
+    acme $client;
+
+    include /etc/angie/snippets/errors.conf;
+    include /etc/angie/snippets/redirect.conf;
+}
+
+server {
+    listen 127.0.0.1:$SELFSTEAL_PORT default_server;
+    http2 on;
+    server_name _;
+    include /etc/angie/snippets/errors.conf;
+    include /etc/angie/snippets/deny.conf;
+}
+EOF
+}
+
 write_angie_docker_compose() {
     local dir="$1"
     local mode="$2"
@@ -4052,7 +4109,7 @@ services:
             - ./angie.conf:/etc/angie/angie.conf:ro
             - ./conf.d:/etc/angie/conf.d:ro
             - ./snippets:/etc/angie/snippets:ro
-            - remnawave-angie-acme:/var/lib/angie/acme
+            - $ANGIE_ACME_VOLUME:$ANGIE_ACME_DIR
         network_mode: host
 ${healthcheck}        logging:
             driver: 'json-file'
@@ -4061,10 +4118,10 @@ ${healthcheck}        logging:
                 max-file: '5'
 
 volumes:
-    remnawave-angie-acme:
+    $ANGIE_ACME_VOLUME:
         driver: local
         external: false
-        name: remnawave-angie-acme
+        name: $ANGIE_ACME_VOLUME
 EOF
 
     create_makefile "$dir"
@@ -4115,7 +4172,7 @@ wait_for_angie_certificates() {
         still_pending=()
         for client in "${pending[@]}"; do
             if ! docker compose -f "$dir/docker-compose.yml" exec -T angie \
-                test -s "/var/lib/angie/acme/$client/certificate.pem" >/dev/null 2>&1; then
+                test -s "$ANGIE_ACME_DIR/$client/certificate.pem" >/dev/null 2>&1; then
                 still_pending+=("$client")
             fi
         done
@@ -6342,11 +6399,17 @@ install_panel_only() {
 
 
 setup_selfsteal() {
+    local vless_mode="${1:-reality}"
+
     mkdir -p "$SELFSTEAL_DIR"
     cd "$SELFSTEAL_DIR"
 
     write_angie_base_config "$SELFSTEAL_DIR"
-    write_angie_sites "$SELFSTEAL_DIR" "xray" "selfsteal:$SELF_STEAL_DOMAIN:deny"
+    if [ "$vless_mode" = "tls" ]; then
+        write_angie_tls_fallback_sites "$SELFSTEAL_DIR" "selfsteal" "$SELF_STEAL_DOMAIN"
+    else
+        write_angie_sites "$SELFSTEAL_DIR" "xray" "selfsteal:$SELF_STEAL_DOMAIN:deny"
+    fi
     write_angie_docker_compose "$SELFSTEAL_DIR" "xray" "angie-selfsteal"
 
     if ! start_container "$SELFSTEAL_DIR" "Angie"; then
@@ -6354,7 +6417,9 @@ setup_selfsteal() {
         exit 1
     fi
 
-    wait_for_angie_certificates "$SELFSTEAL_DIR" "selfsteal"
+    if ! wait_for_angie_certificates "$SELFSTEAL_DIR" "selfsteal" && [ "$vless_mode" = "tls" ]; then
+        show_warning "$(t node_tls_certificate_missing)"
+    fi
 
     ANGIE_STATUS=$(docker compose ps --services --filter "status=running" | grep -q "angie" && echo "running" || echo "stopped")
 
@@ -6367,8 +6432,50 @@ setup_selfsteal() {
 
 # Including module: node.sh
 
+select_node_vless_mode() {
+    echo -e "${BOLD_BLUE}$(t node_vless_mode_title)${NC}"
+    echo
+    echo -e "  ${BOLD_GREEN}1)${NC} $(t node_vless_mode_reality)"
+    echo -e "     ${YELLOW}$(t node_vless_mode_reality_desc)${NC}"
+    echo
+    echo -e "  ${BOLD_GREEN}2)${NC} $(t node_vless_mode_tls)"
+    echo -e "     ${YELLOW}$(t node_vless_mode_tls_desc)${NC}"
+    echo
+
+    while true; do
+        read -p "$(echo -e "${ORANGE}$(t main_menu_select_option) ${NC}")" choice
+        case $choice in
+        1)
+            NODE_VLESS_MODE="reality"
+            break
+            ;;
+        2)
+            NODE_VLESS_MODE="tls"
+            break
+            ;;
+        *)
+            echo -e "${BOLD_RED}$(t error_invalid_choice)${NC}"
+            ;;
+        esac
+    done
+    echo
+}
+
 create_node_docker_compose() {
     local certificate="$1"
+    local vless_mode="${2:-reality}"
+
+    # VLESS TLS: Xray reads the certificate Angie issues and renews. It reloads
+    # certificate files every hour, so renewals need no restart.
+    local acme_volume="" acme_volume_definition=""
+    if [ "$vless_mode" = "tls" ]; then
+        acme_volume="            - $ANGIE_ACME_VOLUME:$ANGIE_ACME_DIR:ro"$'\n'
+        acme_volume_definition="
+volumes:
+    $ANGIE_ACME_VOLUME:
+        external: true
+        name: $ANGIE_ACME_VOLUME"
+    fi
 
     mkdir -p "$REMNANODE_DIR"
     cd "$REMNANODE_DIR"
@@ -6393,11 +6500,12 @@ services:
         volumes:
             - /dev/shm:/dev/shm
             - /var/log/remnanode:/var/log/remnanode
-        logging:
+${acme_volume}        logging:
             driver: 'json-file'
             options:
                 max-size: '100m'
                 max-file: '5'
+${acme_volume_definition}
 EOF
 
     create_makefile "$REMNANODE_DIR"
@@ -6481,6 +6589,49 @@ start_node_and_show_results() {
     echo
 }
 
+show_node_tls_inbound() {
+    local cert_dir="$ANGIE_ACME_DIR/selfsteal"
+
+    echo -e "${BOLD_GREEN}$(t node_tls_profile_title)${NC}"
+    echo -e "${YELLOW}$(t node_tls_profile_hint)${NC}"
+    echo
+    cat <<EOF
+{
+  "tag": "VLESS_TLS",
+  "port": 443,
+  "protocol": "vless",
+  "settings": {
+    "clients": [],
+    "decryption": "none",
+    "fallbacks": [
+      { "dest": "127.0.0.1:$SELFSTEAL_PORT", "xver": 0 }
+    ]
+  },
+  "sniffing": {
+    "enabled": true,
+    "destOverride": ["http", "tls", "quic"]
+  },
+  "streamSettings": {
+    "network": "tcp",
+    "security": "tls",
+    "tlsSettings": {
+      "serverName": "$SELF_STEAL_DOMAIN",
+      "alpn": ["h2", "http/1.1"],
+      "certificates": [
+        {
+          "certificateFile": "$cert_dir/certificate.pem",
+          "keyFile": "$cert_dir/private.key"
+        }
+      ]
+    }
+  }
+}
+EOF
+    echo
+    echo -e "${YELLOW}$(t node_tls_profile_host) ${BOLD_GREEN}$SELF_STEAL_DOMAIN${NC}"
+    echo
+}
+
 setup_node() {
     clear
 
@@ -6497,22 +6648,29 @@ setup_node() {
 
     check_node_ports
 
+    select_node_vless_mode
+
     collect_node_ssl_certificate
 
     # Create node docker-compose
-    create_node_docker_compose "$CERTIFICATE"
+    create_node_docker_compose "$CERTIFICATE" "$NODE_VLESS_MODE"
 
     setup_node_log_rotation
 
-    # Setup and start Angie (in selfsteal.sh)
-    setup_selfsteal
+    # Setup and start Angie (in selfsteal.sh); it creates the certificate volume first
+    setup_selfsteal "$NODE_VLESS_MODE"
 
     # Start node (waits for Angie)
     start_node_and_show_results
 
+    if [ "$NODE_VLESS_MODE" = "tls" ]; then
+        show_node_tls_inbound
+    fi
+
     unset CERTIFICATE
     unset NODE_PORT
     unset SELF_STEAL_DOMAIN
+    unset NODE_VLESS_MODE
 
     echo -e "\n${BOLD_GREEN}$(t node_press_enter_return)${NC}"
     read -r

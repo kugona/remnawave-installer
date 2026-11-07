@@ -360,6 +360,45 @@ EOF
     } >"$dir/conf.d/sites.conf"
 }
 
+# Write the config for a VLESS TLS node: Xray owns port 443 with the certificate issued
+# here and falls back to 127.0.0.1:$SELFSTEAL_PORT as plain HTTP, so Angie serves no TLS.
+# A client that negotiated h2 with Xray falls back as h2c, which "http2 on" accepts
+# next to HTTP/1.1 on the same port.
+write_angie_tls_fallback_sites() {
+    local dir="$1"
+    local client="$2"
+    local domain="$3"
+
+    cat >"$dir/conf.d/sites.conf" <<EOF
+acme_client $client $ACME_DIRECTORY_URL retry_after_error=15m;
+
+server {
+$(angie_http_listens " default_server")
+    server_name _;
+    include /etc/angie/snippets/errors.conf;
+    include /etc/angie/snippets/deny.conf;
+}
+
+server {
+$(angie_http_listens "")
+    server_name $domain;
+
+    acme $client;
+
+    include /etc/angie/snippets/errors.conf;
+    include /etc/angie/snippets/redirect.conf;
+}
+
+server {
+    listen 127.0.0.1:$SELFSTEAL_PORT default_server;
+    http2 on;
+    server_name _;
+    include /etc/angie/snippets/errors.conf;
+    include /etc/angie/snippets/deny.conf;
+}
+EOF
+}
+
 write_angie_docker_compose() {
     local dir="$1"
     local mode="$2"
@@ -386,7 +425,7 @@ services:
             - ./angie.conf:/etc/angie/angie.conf:ro
             - ./conf.d:/etc/angie/conf.d:ro
             - ./snippets:/etc/angie/snippets:ro
-            - remnawave-angie-acme:/var/lib/angie/acme
+            - $ANGIE_ACME_VOLUME:$ANGIE_ACME_DIR
         network_mode: host
 ${healthcheck}        logging:
             driver: 'json-file'
@@ -395,10 +434,10 @@ ${healthcheck}        logging:
                 max-file: '5'
 
 volumes:
-    remnawave-angie-acme:
+    $ANGIE_ACME_VOLUME:
         driver: local
         external: false
-        name: remnawave-angie-acme
+        name: $ANGIE_ACME_VOLUME
 EOF
 
     create_makefile "$dir"
@@ -453,7 +492,7 @@ wait_for_angie_certificates() {
         still_pending=()
         for client in "${pending[@]}"; do
             if ! docker compose -f "$dir/docker-compose.yml" exec -T angie \
-                test -s "/var/lib/angie/acme/$client/certificate.pem" >/dev/null 2>&1; then
+                test -s "$ANGIE_ACME_DIR/$client/certificate.pem" >/dev/null 2>&1; then
                 still_pending+=("$client")
             fi
         done
